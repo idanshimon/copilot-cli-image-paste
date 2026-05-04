@@ -193,7 +193,7 @@ Tested with:
 
 The [`github/copilot-cli`](https://github.com/github/copilot-cli) repository is a **distribution-only repo** — it contains no source code (just `README.md`, `install.sh`, and `LICENSE`). The application source is closed. This patch is a monkey-patch workaround until the feature is implemented upstream.
 
-An issue has been filed at [github/copilot-cli#XXXX](https://github.com/github/copilot-cli/issues) to track official support.
+An issue has been filed at [github/copilot-cli#3104](https://github.com/github/copilot-cli/issues/3104) to track official support.
 
 ---
 
