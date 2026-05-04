@@ -191,7 +191,19 @@ Tested with:
 
 ---
 
-## Why Not a Pull Request?
+## Known Limitations
+
+### Backspace deletes token character-by-character (macOS)
+
+On Windows, pressing `Backspace` on an image attachment token (e.g. `[📎 copilot-image-14c299.png]`) removes the entire token at once. On macOS, each `Backspace` removes one character — you need to press it repeatedly to clear the token.
+
+**Root cause:** The CLI's token-boundary backspace handler is deep inside the 14 MB minified `app.js` bundle with no accessible hook point. On macOS, `Backspace` sends `\x7f` (DEL byte); the token-aware deletion logic may only be wired to Windows-specific key sequences.
+
+**Workaround:** Press `Backspace` multiple times, or use `Ctrl+U` to clear the entire input line.
+
+Tracked upstream: [github/copilot-cli#3105](https://github.com/github/copilot-cli/issues/3105)
+
+
 
 The [`github/copilot-cli`](https://github.com/github/copilot-cli) repository is a **distribution-only repo** — it contains no source code (just `README.md`, `install.sh`, and `LICENSE`). The application source is closed. This patch is a monkey-patch workaround until the feature is implemented upstream.
 
