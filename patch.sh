@@ -70,8 +70,8 @@ apply_patch() {
 // Ctrl+V (without Cmd) emits the raw byte \x16 (ASCII 26), which the CLI
 // treats as a literal character — it never reaches the image-paste path.
 //
-// THE FIX
-// -------
+// THE FIX — image paste
+// ---------------------
 // We wrap process.stdin.read() — the method the CLI's readline loop calls on
 // every "readable" event — and intercept zero-argument reads (full-chunk mode).
 // When we detect \x16 (Ctrl+V) in the chunk, we:
@@ -81,6 +81,22 @@ apply_patch() {
 //      → This triggers the CLI's existing onEmptyPasteFallback path, which
 //        calls ClipboardManager().getImageData() and attaches the image.
 //   4. Otherwise: return chunk unchanged
+//
+// THE FIX — backspace whole-token deletion
+// -----------------------------------------
+// After the paste sequence is injected the CLI runs an async chain to:
+//   getImageData() → write temp file → checkForAttachmentPath() → insertInput()
+// This chain takes ~20–100 ms.  If the user presses Backspace before it
+// completes the image token is not yet in the input, oNt() (the CLI's
+// whole-token backspace handler) returns false, and the key falls through to
+// char-by-char deletion mode.
+//
+// Fix: when a *solo* \x7f (Backspace) arrives within 500 ms of a paste, we
+// intercept it, schedule its redelivery via process.stdin.push() after the
+// remaining window (ensuring the async chain has finished), and return null
+// to the readline loop so nothing happens in the meantime.  When the backspace
+// is redelivered the token is already in the input and oNt() deletes the whole
+// token in one keystroke — matching the Windows behavior.
 //
 // WHY HERE (this file)
 // --------------------
@@ -94,6 +110,9 @@ apply_patch() {
 if (process.platform === 'darwin' && process.stdin && process.stdin.isTTY) {
   try {
     const _origRead = process.stdin.read.bind(process.stdin)
+    // Timestamp of the last injected image paste; 0 = none in flight.
+    let _pasteTs = 0
+
     process.stdin.read = function (...args) {
       const chunk = _origRead(...args)
       // Only intercept no-arg reads (full-chunk reads from the readline loop).
@@ -101,6 +120,7 @@ if (process.platform === 'darwin' && process.stdin && process.stdin.isTTY) {
       if (args.length === 0 && chunk !== null) {
         const isString = typeof chunk === 'string'
         const ctrlVIdx = isString ? chunk.indexOf('\x16') : chunk.indexOf(0x16)
+
         if (ctrlVIdx !== -1) {
           try {
             const mgr = new nativeBinding.ClipboardManager()
@@ -117,6 +137,7 @@ if (process.platform === 'darwin' && process.stdin && process.stdin.isTTY) {
                 // The CLI's existing paste handler detects this and calls
                 // onEmptyPasteFallback() → ClipboardManager().getImageData().
                 const PASTE_SEQ = '\x1B[200~\x1B[201~'
+                _pasteTs = Date.now()
                 if (isString) {
                   return chunk.slice(0, ctrlVIdx) + PASTE_SEQ + chunk.slice(ctrlVIdx + 1)
                 } else {
@@ -129,6 +150,29 @@ if (process.platform === 'darwin' && process.stdin && process.stdin.isTTY) {
               }
             }
           } catch (_) { /* clipboard error — fall through, return chunk unchanged */ }
+        }
+
+        // Backspace timing fix: delay a solo \x7f that arrives within 500 ms
+        // of an image paste so the async token-insert chain can complete first.
+        if (_pasteTs > 0) {
+          const elapsed = Date.now() - _pasteTs
+          const isSoloBackspace = isString
+            ? chunk === '\x7f'
+            : (chunk.length === 1 && chunk[0] === 0x7f)
+
+          if (isSoloBackspace && elapsed < 500) {
+            _pasteTs = 0
+            const delay = Math.max(50, 500 - elapsed + 50)
+            try {
+              setTimeout(() => {
+                try { process.stdin.push(isString ? '\x7f' : Buffer.from([0x7f])) } catch (_) {}
+              }, delay)
+            } catch (_) {}
+            return null
+          }
+
+          // Any non-backspace key clears paste state (cursor may have moved).
+          _pasteTs = 0
         }
       }
       return chunk

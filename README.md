@@ -113,6 +113,18 @@ On each stdin.read() call (no-arg reads only):
   RETURN chunk unchanged   ← text clipboard, no clipboard content, or any error
 ```
 
+### Backspace whole-token deletion fix
+
+After the paste sequence is injected the CLI runs an async chain to fetch the image, write a temp file, and call `insertInput()` to place the `[📷 filename.png]` token in the input buffer. This chain takes roughly 20–100 ms.
+
+If the user presses **Backspace** before the chain completes the token doesn't exist yet, so the CLI's `oNt()` (whole-token backspace handler) finds nothing and falls back to deleting one character at a time.
+
+The patch tracks a `_pasteTs` timestamp whenever it injects a paste sequence. If a **solo `\x7f`** (Backspace) arrives within **500 ms**, the patch:
+
+1. Intercepts it and returns `null` to the readline loop (nothing happens visually).
+2. Schedules `process.stdin.push('\x7f')` via `setTimeout` after the remaining window expires.
+3. When the timer fires the token is already in the input; `oNt()` deletes the whole token at once — matching Windows behavior.
+
 ### Why `stdin.read()` and not something else
 
 The CLI's input loop works like this:
@@ -193,16 +205,7 @@ Tested with:
 
 ## Known Limitations
 
-### Backspace deletes token character-by-character (macOS)
-
-On Windows, pressing `Backspace` on an image attachment token (e.g. `[📎 copilot-image-14c299.png]`) removes the entire token at once. On macOS, each `Backspace` removes one character — you need to press it repeatedly to clear the token.
-
-**Root cause:** The CLI's token-boundary backspace handler is deep inside the 14 MB minified `app.js` bundle with no accessible hook point. On macOS, `Backspace` sends `\x7f` (DEL byte); the token-aware deletion logic may only be wired to Windows-specific key sequences.
-
-**Workaround:** Press `Backspace` multiple times, or use `Ctrl+U` to clear the entire input line.
-
-Tracked upstream: [github/copilot-cli#3105](https://github.com/github/copilot-cli/issues/3105)
-
+_None currently._ The patch handles both image paste and whole-token backspace deletion.
 
 
 The [`github/copilot-cli`](https://github.com/github/copilot-cli) repository is a **distribution-only repo** — it contains no source code (just `README.md`, `install.sh`, and `LICENSE`). The application source is closed. This patch is a monkey-patch workaround until the feature is implemented upstream.
