@@ -4,6 +4,8 @@
 
 Take a screenshot → press **`Ctrl+V`** in the Copilot CLI terminal → the image is attached to your message. Done.
 
+![Demo: pasting a screenshot with Ctrl+V and asking about it](demo.png)
+
 This feature works on Windows out of the box. On macOS it doesn't — this patch fixes that.
 
 ---
